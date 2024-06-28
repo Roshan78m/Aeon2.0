@@ -1,12 +1,14 @@
+#!/usr/bin/env python3
 from bot.helper.ext_utils.bot_utils import MirrorStatus, get_readable_file_size, get_readable_time
 
 
 class GdriveStatus:
-    def __init__(self, obj, size, message, gid, status):
+    def __init__(self, obj, size, message, gid, status, upload_details):
         self.__obj = obj
         self.__size = size
         self.__gid = gid
         self.__status = status
+        self.upload_details = upload_details
         self.message = message
 
     def processed_bytes(self):
@@ -17,12 +19,11 @@ class GdriveStatus:
 
     def status(self):
         if self.__status == 'up':
-            if self.__obj.processed_bytes == 0:
-                return MirrorStatus.STATUS_PROCESSING
             return MirrorStatus.STATUS_UPLOADING
         elif self.__status == 'dl':
             return MirrorStatus.STATUS_DOWNLOADING
-        return MirrorStatus.STATUS_CLONING
+        else:
+            return MirrorStatus.STATUS_CLONING
 
     def name(self):
         return self.__obj.name

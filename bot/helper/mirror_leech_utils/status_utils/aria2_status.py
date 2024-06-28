@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from time import time
 
 from bot import aria2, LOGGER
@@ -18,6 +19,7 @@ class Aria2Status:
         self.__gid = gid
         self.__download = get_download(gid)
         self.__listener = listener
+        self.upload_details = self.__listener.upload_details
         self.queued = queued
         self.start_time = 0
         self.seeding = seeding
@@ -81,7 +83,7 @@ class Aria2Status:
         return f"{round(self.__download.upload_length / self.__download.completed_length, 3)}"
 
     def seeding_time(self):
-        return get_readable_time(time() - self.start_time, True)
+        return get_readable_time(time() - self.start_time)
 
     def download(self):
         return self
