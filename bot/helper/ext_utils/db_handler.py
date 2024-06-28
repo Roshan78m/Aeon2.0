@@ -1,11 +1,15 @@
+#!/usr/bin/env python3
+from os import environ
+
 from aiofiles import open as aiopen
 from aiofiles.os import makedirs
 from aiofiles.os import path as aiopath
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import PyMongoError
 from time import time
+from dotenv import dotenv_values
 
-from bot import DATABASE_URL, LOGGER, aria2_options, bot_id, bot_loop, config_dict, qbit_options, user_data
+from bot import DATABASE_URL, LOGGER, aria2_options, bot_id, bot_loop, bot_name, config_dict, qbit_options, rss_dict, user_data
 
 class DbManager:
     def __init__(self):
@@ -50,6 +54,14 @@ class DbManager:
                         await f.write(row['rclone'])
                     row['rclone'] = rclone_path
                 user_data[uid] = row
+            LOGGER.info("Users data has been imported from Database")
+        if await self.__db.rss[bot_id].find_one():
+            rows = self.__db.rss[bot_id].find({})
+            async for row in rows:
+                user_id = row['_id']
+                del row['_id']
+                rss_dict[user_id] = row
+            LOGGER.info("Rss data has been imported from Database.")
         self.__conn.close
 
     async def update_config(self, dict_):
@@ -62,6 +74,12 @@ class DbManager:
         if self.__err:
             return
         await self.__db.settings.aria2c.update_one({'_id': bot_id}, {'$set': {key: value}}, upsert=True)
+        self.__conn.close
+
+    async def update_qbittorrent(self, key, value):
+        if self.__err:
+            return
+        await self.__db.settings.qbittorrent.update_one({'_id': bot_id}, {'$set': {key: value}}, upsert=True)
         self.__conn.close
 
     async def update_private_file(self, path):
@@ -121,6 +139,90 @@ class DbManager:
         await self.__db.pm_users[bot_id].delete_one({'_id': user_id})
         self.__conn.close
         
+    async def rss_update_all(self):
+        if self.__err:
+            return
+        for user_id in list(rss_dict.keys()):
+            await self.__db.rss[bot_id].replace_one({'_id': user_id}, rss_dict[user_id], upsert=True)
+        self.__conn.close
+
+    async def rss_update(self, user_id):
+        if self.__err:
+            return
+        await self.__db.rss[bot_id].replace_one({'_id': user_id}, rss_dict[user_id], upsert=True)
+        self.__conn.close
+
+    async def rss_delete(self, user_id):
+        if self.__err:
+            return
+        await self.__db.rss[bot_id].delete_one({'_id': user_id})
+        self.__conn.close
+
+    async def add_incomplete_task(self, cid, link, tag):
+        if self.__err:
+            return
+        await self.__db.tasks[bot_id].insert_one({'_id': link, 'cid': cid, 'tag': tag})
+        self.__conn.close
+
+    async def rm_complete_task(self, link):
+        if self.__err:
+            return
+        await self.__db.tasks[bot_id].delete_one({'_id': link})
+        self.__conn.close
+
+    async def get_incomplete_tasks(self):
+        notifier_dict = {}
+        if self.__err:
+            return notifier_dict
+        if await self.__db.tasks[bot_id].find_one():
+            rows = self.__db.tasks[bot_id].find({})
+            async for row in rows:
+                if row['cid'] in list(notifier_dict.keys()):
+                    if row['tag'] in list(notifier_dict[row['cid']]):
+                        notifier_dict[row['cid']][row['tag']].append(
+                            row['_id'])
+                    else:
+                        notifier_dict[row['cid']][row['tag']] = [row['_id']]
+                else:
+                    notifier_dict[row['cid']] = {row['tag']: [row['_id']]}
+        await self.__db.tasks[bot_id].drop()
+        self.__conn.close
+        return notifier_dict
+
+    async def trunc_table(self, name):
+        if self.__err:
+            return
+        await self.__db[name][bot_id].drop()
+        self.__conn.close
+
+    async def add_download_url(self, url: str, tag: str):
+        if self.__err:
+            return
+        download = {'_id': url, 'tag': tag, 'botname': bot_name}
+        await self.__db.download_links.update_one({'_id': url}, {'$set': download}, upsert=True)
+        self.__conn.close
+
+    async def check_download(self, url: str):
+        if self.__err:
+            return
+        exist = await self.__db.download_links.find_one({'_id': url})
+        self.__conn.close
+        return exist
+
+    async def clear_download_links(self, botName=None):
+        if self.__err:
+            return
+        if not botName:
+            botName = bot_name
+        await self.__db.download_links.delete_many({'botname': botName})
+        self.__conn.close
+
+    async def remove_download(self, url: str):
+        if self.__err:
+            return
+        await self.__db.download_links.delete_one({'_id': url})
+        self.__conn.close
+
     async def update_user_tdata(self, user_id, token, time):
         if self.__err:
             return
@@ -133,7 +235,7 @@ class DbManager:
         await self.__db.access_token.update_one({'_id': user_id}, {'$set': {'token': token}}, upsert=True)
         self.__conn.close
 
-    async def get_token_expiry(self, user_id):
+    async def get_token_expire_time(self, user_id):
         if self.__err:
             return None
         user_data = await self.__db.access_token.find_one({'_id': user_id})
@@ -141,11 +243,6 @@ class DbManager:
             return user_data.get('time')
         self.__conn.close
         return None
-
-    async def delete_user_token(self, user_id):
-        if self.__err:
-            return None
-        await self.__db.access_token.delete_one({'_id': user_id})
 
     async def get_user_token(self, user_id):
         if self.__err:
