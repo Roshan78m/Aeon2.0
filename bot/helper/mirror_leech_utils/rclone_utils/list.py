@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from asyncio import wait_for, Event, wrap_future
 from aiofiles.os import path as aiopath
 from aiofiles import open as aiopen
