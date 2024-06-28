@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from pyrogram.handlers import MessageHandler, CallbackQueryHandler
 from pyrogram.filters import command, regex
 from html import escape
@@ -12,96 +13,77 @@ from bot import bot, LOGGER, config_dict, bot_name, user_data
 from bot.helper.ext_utils.bot_utils import is_url, is_magnet, is_mega_link, is_gdrive_link, get_content_type, new_task, sync_to_async, is_rclone_path, is_telegram_link, arg_parser, fetch_user_tds
 from bot.helper.ext_utils.exceptions import DirectDownloadLinkException
 from bot.helper.ext_utils.task_manager import task_utils
-from bot.helper.mirror_leech_utils.download_utils.aria2_download import add_aria2c_download
-from bot.helper.mirror_leech_utils.download_utils.gd_download import add_gd_download
-from bot.helper.mirror_leech_utils.download_utils.qbit_download import add_qb_torrent
-from bot.helper.mirror_leech_utils.download_utils.mega_download import add_mega_download
-from bot.helper.mirror_leech_utils.download_utils.rclone_download import add_rclone_download
-from bot.helper.mirror_leech_utils.rclone_utils.list import RcloneList
-from bot.helper.mirror_leech_utils.upload_utils.gdriveTools import GoogleDriveHelper
-from bot.helper.mirror_leech_utils.download_utils.direct_link_generator import direct_link_generator
-from bot.helper.mirror_leech_utils.download_utils.telegram_download import TelegramDownloadHelper
+from bot.helper.mirror_utils.download_utils.aria2_download import add_aria2c_download
+from bot.helper.mirror_utils.download_utils.gd_download import add_gd_download
+from bot.helper.mirror_utils.download_utils.qbit_download import add_qb_torrent
+from bot.helper.mirror_utils.download_utils.mega_download import add_mega_download
+from bot.helper.mirror_utils.download_utils.rclone_download import add_rclone_download
+from bot.helper.mirror_utils.rclone_utils.list import RcloneList
+from bot.helper.mirror_utils.upload_utils.gdriveTools import GoogleDriveHelper
+from bot.helper.mirror_utils.download_utils.direct_link_generator import direct_link_generator
+from bot.helper.mirror_utils.download_utils.telegram_download import TelegramDownloadHelper
 from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.message_utils import sendMessage, editMessage, get_tg_link_content, delete_links, deleteMessage, one_minute_del, five_minute_del, isAdmin
 from bot.helper.listeners.tasks_listener import MirrorLeechListener
-from bot.helper.ext_utils.help_strings import MIRROR_HELP_MESSAGE
+from bot.helper.ext_utils.help_messages import MIRROR_HELP_MESSAGE
 from bot.helper.ext_utils.bulk_links import extract_bulk_links
-from bot.helper.aeon_utils.send_react import send_react
-from bot.helper.mirror_leech_utils.download_utils.direct_downloader import add_direct_download
-from bot.helper.aeon_utils.nsfw_check import nsfw_precheck
+from bot.helper.mirror_utils.download_utils.direct_downloader import add_direct_download
+import random
 
 @new_task
 async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=None, bulk=[]):
-    await send_react(message)
-    user_id      = message.from_user.id
-    user_dict    = user_data.get(user_id, {})
-    text         = message.text.split('\n')
-    input_list   = text[0].split(' ')
-    arg_base     = {
-        'link'    : '', 
-        '-t'      : '',
-        '-m'      : '',
-        '-n'      : '',
-        '-h'      : '',
-        '-u'      : '',
-        '-p'      : '',
-        '-up'     : '',
-        '-rcf'    : '', 
-        '-id'     : '',
-        '-index'  : '',
-        '-d'      : False,
-        '-j'      : False,
-        '-s'      : False,
-        '-b'      : False,
-        '-e'      : False,
-        '-z'      : False,
-        '-i'      : '0',
-        '-ss'     : '0',
-        '-atc'    : ''
+    text = message.text.split('\n')
+    input_list = text[0].split(' ')
+    dottorrent = False
+    arg_base = {'link'    : '', 
+                '-i'      : 0,
+                '-d'      : False,
+                '-j'      : False,
+                '-s'      : False,
+                '-b'      : False,
+                '-e'      : False,
+                '-z'      : False,
+                '-m'      : '',
+                '-n'      : '',
+                '-h'      : '',
+                '-u'      : '',
+                '-p'      : '',
+                '-up'     : '',
+                '-rcf'    : '', 
+                '-id'     : '',
+                '-index'  : '',
     }
-    
-    args         = arg_parser(input_list[1:], arg_base)
-    attachment   = args['-atc'] or user_dict.get('attachment', '') or config_dict['ATTACHMENT_URL']
-    i            = args['-i']
-    link         = args['link']
-    headers      = args['-h']
-    folder_name  = args['-m']
-    seed         = args['-d']
-    join         = args['-j']
-    select       = args['-s']
-    isBulk       = args['-b']
-    name         = args['-n']
-    extract      = args['-e']
-    compress     = args['-z']
-    up           = args['-up']
-    thumb        = args['-t']
-    rcf          = args['-rcf']
-    drive_id     = args['-id']
-    index_link   = args['-index']
-    ss           = args['-ss']
-    multi        = int(i) if i.isdigit() else 0
-    sshots       = min(int(ss) if ss.isdigit() else 0, 10)
-    bulk_start   = 0
-    bulk_end     = 0
-    ratio        = None
-    seed_time    = None
-    reply_to     = None
-    file_        = None
-    session      = ''
 
-    if link:
-    	  if is_magnet(link) or link.endswith('.torrent'):
-    	  	  isQbit = True
-    elif not link and (reply_to := message.reply_to_message):
-        if reply_to.text:
-            reply_text = reply_to.text.split('\n', 1)[0].strip()
-            if reply_text and is_magnet(reply_text):
-                isQbit = True
-    if reply_to := message.reply_to_message:
-    	  file_ = getattr(reply_to, reply_to.media.value) if reply_to.media else None
-    	  if reply_to.document and (file_.mime_type == 'application/x-bittorrent' or file_.file_name.endswith('.torrent')):
-    	      isQbit = True
+    args = arg_parser(input_list[1:], arg_base)
+
+    try:
+        multi = int(args['-i'])
+    except:
+        multi = 0
+
+    link          = args['link']
+    headers       = args['-h']
+    folder_name   = args['-m']
+    seed          = args['-d']
+    join          = args['-j']
+    select        = args['-s']
+    isBulk        = args['-b']
+    name          = args['-n']
+    extract       = args['-e']
+    compress      = args['-z']
+    up            = args['-up']
+    rcf           = args['-rcf']
+    drive_id      = args['-id']
+    index_link    = args['-index']
+    bulk_start    = 0
+    bulk_end      = 0
+    ratio         = None
+    seed_time     = None
+    reply_to      = None
+    file_         = None
+    session       = ''
+
     if not isinstance(seed, bool):
         dargs = seed.split(':')
         ratio = dargs[0] or None
@@ -208,11 +190,12 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
         file_ = getattr(reply_to, reply_to.media.value) if reply_to.media else None
         if file_ is None:
             reply_text = reply_to.text.split('\n', 1)[0].strip()
-            if is_url(reply_text) or is_magnet(reply_text) or is_rclone_path(reply_text):
+            if is_url(reply_text) or is_magnet(reply_text):
                 link = reply_text
         elif reply_to.document and (file_.mime_type == 'application/x-bittorrent' or file_.file_name.endswith('.torrent')):
             link = await reply_to.download()
             file_ = None
+            dottorrent = True
 
     if not is_url(link) and not is_magnet(link) and not await aiopath.exists(link) and not is_rclone_path(link) and file_ is None:
         reply_message = await sendMessage(message, MIRROR_HELP_MESSAGE)
@@ -220,17 +203,17 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
         await one_minute_del(reply_message)
         return
 
+    olink = link if link and not dottorrent else ''
     error_msg = []
     error_button = None
-    if await nsfw_precheck(message):
-    	  error_msg.extend(['NSFW detected'])
-    task_utilis_msg, error_button = await task_utils(message)
-    if task_utilis_msg:
-        error_msg.extend(task_utilis_msg)
+    if not await isAdmin(message):
+        task_utilis_msg, error_button = await task_utils(message)
+        if task_utilis_msg:
+            error_msg.extend(task_utilis_msg)
     if error_msg:
         final_msg = f'Hey, <b>{tag}</b>!\n'
         for __i, __msg in enumerate(error_msg, 1):
-            final_msg += f'\n<blockquote><b>{__i}</b>: {__msg}</blockquote>'
+            final_msg += f'\n<b>{__i}</b>: {__msg}\n'
         if error_button is not None:
             error_button = error_button.build_menu(2)
         await delete_links(message)
@@ -247,7 +230,7 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
                 link = await sync_to_async(direct_link_generator, link)
                 if isinstance(link, tuple):
                     link, headers = link
-                elif isinstance(link, str):
+                if isinstance(link, str):
                     LOGGER.info(f"Generated link: {link}")
             except DirectDownloadLinkException as e:
                 LOGGER.info(str(e))
@@ -301,7 +284,7 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
             await delete_links(message)
             return
 
-    listener = MirrorLeechListener(message, compress, extract, isQbit, isLeech, tag, select, seed, sameDir, rcf, up, join, drive_id=drive_id, index_link=index_link, attachment=attachment, files_utils={'screenshots': sshots, 'thumb': thumb})
+    listener = MirrorLeechListener(message, compress, extract, isQbit, isLeech, tag, select, seed, sameDir, rcf, up, join, drive_id=drive_id, index_link=index_link, source_url=olink)
 
     if file_ is not None:
         await delete_links(message)
@@ -326,14 +309,17 @@ async def _mirror_leech(client, message, isQbit=False, isLeech=False, sameDir=No
         await add_mega_download(link, f'{path}/', listener, name)
     elif isQbit:
         await add_qb_torrent(link, path, listener, ratio, seed_time)
-        LOGGER.info('Downloading with qbitEngine')
     else:
         ussr = args['-u']
         pssw = args['-p']
         if ussr or pssw:
             auth = f"{ussr}:{pssw}"
-            headers += f" authorization: Basic {b64encode(auth.encode()).decode('ascii')}"
-        await add_aria2c_download(link, path, listener, name, headers, ratio, seed_time)
+            auth = f"authorization: Basic {b64encode(auth.encode()).decode('ascii')}"
+        else:
+            auth = ''
+        if headers:
+            auth += f'{auth} {headers}'
+        await add_aria2c_download(link, path, listener, name, auth, ratio, seed_time)
     await delete_links(message)
 
 
@@ -341,9 +327,23 @@ async def mirror(client, message):
     _mirror_leech(client, message)
 
 
+async def qb_mirror(client, message):
+    _mirror_leech(client, message, isQbit=True)
+
+
 async def leech(client, message):
     _mirror_leech(client, message, isLeech=True)
 
 
-bot.add_handler(MessageHandler(mirror, filters=command(BotCommands.MirrorCommand) & CustomFilters.authorized))
-bot.add_handler(MessageHandler(leech, filters=command(BotCommands.LeechCommand) & CustomFilters.authorized))
+async def qb_leech(client, message):
+    _mirror_leech(client, message, isQbit=True, isLeech=True)
+
+
+bot.add_handler(MessageHandler(mirror, filters=command(
+    BotCommands.MirrorCommand) & CustomFilters.authorized))
+bot.add_handler(MessageHandler(qb_mirror, filters=command(
+    BotCommands.QbMirrorCommand) & CustomFilters.authorized))
+bot.add_handler(MessageHandler(leech, filters=command(
+    BotCommands.LeechCommand) & CustomFilters.authorized))
+bot.add_handler(MessageHandler(qb_leech, filters=command(
+    BotCommands.QbLeechCommand) & CustomFilters.authorized))

@@ -1,8 +1,9 @@
-from time import time
-from quoters import Quote
+#!/usr/bin/env python3
 from pyrogram.handlers import MessageHandler, CallbackQueryHandler
 from pyrogram.filters import command, regex
 from psutil import cpu_percent, virtual_memory, disk_usage
+from time import time
+from quoters import Quote
 
 from bot import status_reply_dict_lock, download_dict, download_dict_lock, botStartTime, Interval, config_dict, bot
 from bot.helper.telegram_helper.filters import CustomFilters
@@ -14,17 +15,11 @@ from bot.helper.ext_utils.bot_utils import get_readable_file_size, get_readable_
 async def mirror_status(_, message):
     async with download_dict_lock:
         count = len(download_dict)
-
     if count == 0:
         currentTime = get_readable_time(time() - botStartTime)
         free = get_readable_file_size(disk_usage('/usr/src/app/downloads/').free)
-        quote = Quote.print().split('―', 1)[0].strip().replace("“", "").replace("”", "")
-
-        msg = f'<b>{quote}</b>\n\n'
-        msg += 'No downloads are currently in progress.\n'
-        msg += f"\n<b>• Bot uptime</b>: {currentTime}"
-        msg += f"\n<b>• Free disk space</b>: {free}"
-
+        msg = 'No Active Downloads !\n'
+        msg += f"\n<b>❅ Bot uptime</b>: {currentTime}"
         reply_message = await sendMessage(message, msg)
         await deleteMessage(message)
         await one_minute_del(reply_message)
@@ -48,5 +43,6 @@ async def status_pages(_, query):
         await turn_page(data)
 
 
-bot.add_handler(MessageHandler(mirror_status, filters=command(BotCommands.StatusCommand) & CustomFilters.authorized))
+bot.add_handler(MessageHandler(mirror_status, filters=command(
+    BotCommands.StatusCommand) & CustomFilters.authorized))
 bot.add_handler(CallbackQueryHandler(status_pages, filters=regex("^status")))
