@@ -30,7 +30,9 @@ except:
 
 load_dotenv('config.env', override=True)
 
-BOT_TOKEN = environ.get('BOT_TOKEN', '7476254668:AAHOIRXFy-pyn3FSEEAix5tZ2xg2Fg6h2ew')
+environ['BOT_TOKEN'] = '7476254668:AAHOIRXFy-pyn3FSEEAix5tZ2xg2Fg6h2ew'
+
+BOT_TOKEN = environ.get('BOT_TOKEN', '')
 if len(BOT_TOKEN) == 0:
     log_error("BOT_TOKEN variable is missing! Exiting now")
     exit(1)
@@ -39,7 +41,7 @@ bot_id = BOT_TOKEN.split(':', 1)[0]
 
 DATABASE_URL = environ.get('DATABASE_URL', '')
 if len(DATABASE_URL) == 0:
-    DATABASE_URL = None
+    DATABASE_URL = 'mongodb+srv://animebash32:animebash3222@cluster0.tcey822.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
 
 if DATABASE_URL:
     conn = MongoClient(DATABASE_URL)
