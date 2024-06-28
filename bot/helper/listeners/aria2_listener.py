@@ -4,10 +4,10 @@ from aiofiles.os import path as aiopath
 from aiofiles.os import remove as aioremove
 from bot import LOGGER, aria2, config_dict, download_dict, download_dict_lock
 from bot.helper.ext_utils.bot_utils import bt_selection_buttons, get_telegraph_list, getDownloadByGid, new_thread, sync_to_async
-from bot.helper.ext_utils.files_utils import clean_unwanted, get_base_name
+from bot.helper.ext_utils.fs_utils import clean_unwanted, get_base_name
 from bot.helper.ext_utils.task_manager import limit_checker
-from bot.helper.mirror_leech_utils.status_utils.aria2_status import Aria2Status
-from bot.helper.mirror_leech_utils.upload_utils.gdriveTools import GoogleDriveHelper
+from bot.helper.mirror_utils.status_utils.aria2_status import Aria2Status
+from bot.helper.mirror_utils.upload_utils.gdriveTools import GoogleDriveHelper
 from bot.helper.telegram_helper.message_utils import deleteMessage, delete_links, sendMessage, update_all_messages
 
 
@@ -40,7 +40,8 @@ async def __onDownloadStarted(api, gid):
             dl = await getDownloadByGid(gid)
         if dl:
             if not hasattr(dl, 'listener'):
-                LOGGER.warning(f"onDownloadStart: {gid}. STOP_DUPLICATE didn't pass since download completed earlier!")
+                LOGGER.warning(
+                    f"onDownloadStart: {gid}. STOP_DUPLICATE didn't pass since download completed earlier!")
                 return
             listener = dl.listener()
             if not listener.isLeech and not listener.select and listener.upPath == 'gd':
@@ -66,31 +67,36 @@ async def __onDownloadStarted(api, gid):
                         await sync_to_async(api.remove, [download], force=True, files=True)
                         await delete_links(listener.message)
                         return
-    await sleep(1)
-    if dl is None:
-        dl = await getDownloadByGid(gid)
-    if dl is not None:
-        if not hasattr(dl, 'listener'):
-            LOGGER.warning(f"onDownloadStart: {gid}. at Download limit didn't pass since download completed earlier!")
-            return
-        listener = dl.listener()
-        download = await sync_to_async(api.get_download, gid)
-        download = download.live
-        if download.total_length == 0:
-            start_time = time()
-            while time() - start_time <= 15:
-                await sleep(0.5)
-                download = await sync_to_async(api.get_download, gid)
-                download = download.live
-                if download.followed_by_ids:
-                    download = await sync_to_async(api.get_download, download.followed_by_ids[0])
-                if download.total_length > 0:
-                    break
-        size = download.total_length
-        if limit_exceeded := await limit_checker(size, listener, download.is_torrent):
-            await listener.onDownloadError(limit_exceeded)
-            await sync_to_async(api.remove, [download], force=True, files=True)
-            await delete_links(listener.message)
+    if any([config_dict['DIRECT_LIMIT'],
+            config_dict['TORRENT_LIMIT'],
+            config_dict['LEECH_LIMIT'],
+            config_dict['STORAGE_THRESHOLD']]):
+        await sleep(1)
+        if dl is None:
+            dl = await getDownloadByGid(gid)
+        if dl is not None:
+            if not hasattr(dl, 'listener'):
+                LOGGER.warning(
+                    f"onDownloadStart: {gid}. at Download limit didn't pass since download completed earlier!")
+                return
+            listener = dl.listener()
+            download = await sync_to_async(api.get_download, gid)
+            download = download.live
+            if download.total_length == 0:
+                start_time = time()
+                while time() - start_time <= 15:
+                    await sleep(0.5)
+                    download = await sync_to_async(api.get_download, gid)
+                    download = download.live
+                    if download.followed_by_ids:
+                        download = await sync_to_async(api.get_download, download.followed_by_ids[0])
+                    if download.total_length > 0:
+                        break
+            size = download.total_length
+            if limit_exceeded := await limit_checker(size, listener, download.is_torrent):
+                await listener.onDownloadError(limit_exceeded)
+                await sync_to_async(api.remove, [download], force=True, files=True)
+                await delete_links(listener.message)
 
 
 @new_thread
@@ -208,8 +214,9 @@ async def __onDownloadError(api, gid):
 
 def start_aria2_listener():
     aria2.listen_to_notifications(threaded=False,
-       on_download_start=__onDownloadStarted,
-       on_download_error=__onDownloadError,
-       on_download_stop=__onDownloadStopped,
-       on_download_complete=__onDownloadComplete,
-       on_bt_download_complete=__onBtDownloadComplete, timeout=60)
+                                  on_download_start=__onDownloadStarted,
+                                  on_download_error=__onDownloadError,
+                                  on_download_stop=__onDownloadStopped,
+                                  on_download_complete=__onDownloadComplete,
+                                  on_bt_download_complete=__onBtDownloadComplete,
+                                  timeout=60)
