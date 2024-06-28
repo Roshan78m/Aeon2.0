@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from asyncio import sleep
 from secrets import token_hex
 
@@ -5,22 +6,19 @@ from bot import config_dict, LOGGER, aria2_options, aria2c_global, download_dict
 from bot.helper.ext_utils.bot_utils import sync_to_async
 from bot.helper.ext_utils.task_manager import is_queued, stop_duplicate_check, limit_checker
 from bot.helper.listeners.direct_listener import DirectListener
-from bot.helper.mirror_leech_utils.status_utils.direct_status import DirectStatus
-from bot.helper.mirror_leech_utils.status_utils.queue_status import QueueStatus
+from bot.helper.mirror_utils.status_utils.direct_status import DirectStatus
+from bot.helper.mirror_utils.status_utils.queue_status import QueueStatus
 from bot.helper.telegram_helper.message_utils import delete_links, sendMessage, sendStatusMessage, one_minute_del
-from bot.helper.aeon_utils.nsfw_check import isNSFWdata
 
 async def add_direct_download(details, path, listener, foldername):
     if not (contents:= details.get('contents')):
         await sendMessage(listener.message, 'There is nothing to download!')
         return
     size = details['total_size']
+    if foldername:
+        path = f'{path}/{foldername}'
     if not foldername:
         foldername = details['title']
-    if isNSFWdata(details):
-        await listener.onDownloadError('NSFW detected')
-        return
-    path = f'{path}/{foldername}'
     msg, button = await stop_duplicate_check(foldername, listener)
     if msg:
         msg = await sendMessage(listener.message, msg, button)

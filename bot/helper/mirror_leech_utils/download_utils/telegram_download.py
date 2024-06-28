@@ -1,11 +1,11 @@
-from secrets import token_hex
+#!/usr/bin/env python3
 from logging import getLogger, ERROR
 from time import time
 from asyncio import Lock
 
 from bot import LOGGER, download_dict, download_dict_lock, non_queued_dl, queue_dict_lock, bot, user, IS_PREMIUM_USER
-from bot.helper.mirror_leech_utils.status_utils.telegram_status import TelegramStatus
-from bot.helper.mirror_leech_utils.status_utils.queue_status import QueueStatus
+from bot.helper.mirror_utils.status_utils.telegram_status import TelegramStatus
+from bot.helper.mirror_utils.status_utils.queue_status import QueueStatus
 from bot.helper.telegram_helper.message_utils import sendStatusMessage, sendMessage, delete_links
 from bot.helper.ext_utils.task_manager import is_queued, limit_checker, stop_duplicate_check
 
@@ -37,10 +37,9 @@ class TelegramDownloadHelper:
             GLOBAL_GID.add(file_id)
         self.name = name
         self.__id = file_id
-        gid = token_hex(4)
         async with download_dict_lock:
             download_dict[self.__listener.uid] = TelegramStatus(
-                self, size, self.__listener.message, gid, 'dl')
+                self, size, self.__listener.message, file_id[:8], 'dl', self.__listener.upload_details)
         async with queue_dict_lock:
             non_queued_dl.add(self.__listener.uid)
         if not from_queue:
