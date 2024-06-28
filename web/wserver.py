@@ -8,29 +8,7 @@ from web.nodes import make_tree
 
 app = Flask(__name__)
 
-aria2 = ariaAPI(
-    ariaClient(
-        host="http://localhost",
-        port=6800,
-        secret=""
-    )
-)
-
-xnox_client = qbClient(
-    host="localhost",
-    port=8090,
-    VERIFY_WEBUI_CERTIFICATE=False,
-    REQUESTS_ARGS={
-        "timeout": (
-            30,
-            60
-        )
-    },
-    HTTPADAPTER_ARGS={
-        "pool_maxsize": 200,
-        "pool_block": True
-    },
-)
+aria2 = ariaAPI(ariaClient(host="http://localhost", port=6800, secret=""))
 
 basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             handlers=[FileHandler('log.txt'), StreamHandler()],
@@ -671,7 +649,7 @@ section span{
 """
 
 
-def re_verfiy(paused, resumed, hash_id):
+def re_verfiy(paused, resumed, client, hash_id):
 
     paused = paused.strip()
     resumed = resumed.strip()
@@ -682,7 +660,7 @@ def re_verfiy(paused, resumed, hash_id):
 
     k = 0
     while True:
-        res = xnox_client.torrents_files(torrent_hash=hash_id)
+        res = client.torrents_files(torrent_hash=hash_id)
         verify = True
         for i in res:
             if str(i.id) in paused and i.priority != 0:
@@ -694,16 +672,18 @@ def re_verfiy(paused, resumed, hash_id):
         if verify:
             break
         LOGGER.info("Reverification Failed! Correcting stuff...")
+        client.auth_log_out()
         sleep(1)
+        client = qbClient(host="localhost", port="8090")
         try:
-            xnox_client.torrents_file_priority(
+            client.torrents_file_priority(
                 torrent_hash=hash_id, file_ids=paused, priority=0)
         except NotFound404Error as e:
             raise NotFound404Error from e
         except Exception as e:
             LOGGER.error(f"{e} Errored in reverification paused!")
         try:
-            xnox_client.torrents_file_priority(
+            client.torrents_file_priority(
                 torrent_hash=hash_id, file_ids=resumed, priority=1)
         except NotFound404Error as e:
             raise NotFound404Error from e
@@ -732,8 +712,10 @@ def list_torrent_contents(id_):
         return "<h1>Incorrect pin code</h1>"
 
     if len(id_) > 20:
-        res = xnox_client.torrents_files(torrent_hash=id_)
+        client = qbClient(host="localhost", port="8090")
+        res = client.torrents_files(torrent_hash=id_)
         cont = make_tree(res)
+        client.auth_log_out()
     else:
         res = aria2.client.get_files(id_)
         cont = make_tree(res, True)
@@ -760,23 +742,26 @@ def set_priority(id_):
         pause = pause.strip("|")
         resume = resume.strip("|")
 
+        client = qbClient(host="localhost", port="8090")
+
         try:
-            xnox_client.torrents_file_priority(
+            client.torrents_file_priority(
                 torrent_hash=id_, file_ids=pause, priority=0)
         except NotFound404Error as e:
             raise NotFound404Error from e
         except Exception as e:
             LOGGER.error(f"{e} Errored in paused")
         try:
-            xnox_client.torrents_file_priority(
+            client.torrents_file_priority(
                 torrent_hash=id_, file_ids=resume, priority=1)
         except NotFound404Error as e:
             raise NotFound404Error from e
         except Exception as e:
             LOGGER.error(f"{e} Errored in resumed")
         sleep(1)
-        if not re_verfiy(pause, resume, id_):
+        if not re_verfiy(pause, resume, client, id_):
             LOGGER.error(f"Verification Failed! Hash: {id_}")
+        client.auth_log_out()
     else:
         for i, value in data.items():
             if "filenode" in i and value == "on":
