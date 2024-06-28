@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from pyrogram.handlers import MessageHandler
 from pyrogram.filters import command
 from secrets import token_hex
@@ -7,22 +8,20 @@ from json import loads
 
 from bot import LOGGER, download_dict, download_dict_lock, config_dict, bot
 from bot.helper.ext_utils.task_manager import limit_checker, task_utils
-from bot.helper.mirror_leech_utils.upload_utils.gdriveTools import GoogleDriveHelper
+from bot.helper.mirror_utils.upload_utils.gdriveTools import GoogleDriveHelper
 from bot.helper.telegram_helper.message_utils import sendMessage, editMessage, deleteMessage, sendStatusMessage, delete_links, one_minute_del, five_minute_del, isAdmin
 from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot.helper.telegram_helper.button_build import ButtonMaker
-from bot.helper.mirror_leech_utils.status_utils.gdrive_status import GdriveStatus
+from bot.helper.mirror_utils.status_utils.gdrive_status import GdriveStatus
 from bot.helper.ext_utils.bot_utils import is_gdrive_link, new_task, get_readable_file_size, sync_to_async, fetch_user_tds, is_share_link, new_task, is_rclone_path, cmd_exec, get_telegraph_list, arg_parser
 from bot.helper.ext_utils.exceptions import DirectDownloadLinkException
-from bot.helper.mirror_leech_utils.download_utils.direct_link_generator import direct_link_generator
-from bot.helper.mirror_leech_utils.rclone_utils.list import RcloneList
-from bot.helper.mirror_leech_utils.rclone_utils.transfer import RcloneTransferHelper
-from bot.helper.ext_utils.help_strings import CLONE_HELP_MESSAGE
-from bot.helper.mirror_leech_utils.status_utils.rclone_status import RcloneStatus
+from bot.helper.mirror_utils.download_utils.direct_link_generator import direct_link_generator
+from bot.helper.mirror_utils.rclone_utils.list import RcloneList
+from bot.helper.mirror_utils.rclone_utils.transfer import RcloneTransferHelper
+from bot.helper.ext_utils.help_messages import CLONE_HELP_MESSAGE
+from bot.helper.mirror_utils.status_utils.rclone_status import RcloneStatus
 from bot.helper.listeners.tasks_listener import MirrorLeechListener
-from bot.helper.aeon_utils.nsfw_check import nsfw_precheck
-from bot.helper.aeon_utils.send_react import send_react
 
 
 async def rcloneNode(client, message, link, dst_path, rcf, tag):
@@ -64,7 +63,8 @@ async def rcloneNode(client, message, link, dst_path, rcf, tag):
     remote, src_path = link.split(':', 1)
     src_path = src_path.strip('/')
 
-    cmd = ['xone', 'lsjson', '--fast-list', '--stat', '--no-modtime', '--config', config_path, f'{remote}:{src_path}']
+    cmd = ['xone', 'lsjson', '--fast-list', '--stat',
+           '--no-modtime', '--config', config_path, f'{remote}:{src_path}']
     res = await cmd_exec(cmd)
     if res[2] != 0:
         if res[2] != -9:
@@ -80,14 +80,15 @@ async def rcloneNode(client, message, link, dst_path, rcf, tag):
         name = src_path.rsplit('/', 1)[-1]
         mime_type = rstat['MimeType']
 
-    listener = MirrorLeechListener(message, tag=tag)
+    listener = MirrorLeechListener(message, tag=tag, source_url=link)
     await listener.onDownloadStart()
 
     RCTransfer = RcloneTransferHelper(listener, name)
     LOGGER.info(f'Clone Started: Name: {name} - Source: {link} - Destination: {dst_path}')
     gid = token_hex(4)
     async with download_dict_lock:
-        download_dict[message.id] = RcloneStatus(RCTransfer, message, gid, 'cl')
+        download_dict[message.id] = RcloneStatus(
+            RCTransfer, message, gid, 'cl', listener.upload_details)
     await sendStatusMessage(message)
     link, destination = await RCTransfer.clone(config_path, remote, src_path, dst_path, rcf, mime_type)
     if not link:
@@ -144,7 +145,7 @@ async def gdcloneNode(message, link, listen_up):
                 button = await get_telegraph_list(telegraph_content)
                 await sendMessage(message, msg, button)
                 return
-        listener = MirrorLeechListener(message, tag=listen_up[0], isClone=True, drive_id=listen_up[1], index_link=listen_up[2])
+        listener = MirrorLeechListener(message, tag=listen_up[0], isClone=True, drive_id=listen_up[1], index_link=listen_up[2], source_url=link)
         if limit_exceeded := await limit_checker(size, listener):
             await listener.onUploadError(limit_exceeded)
             return
@@ -158,7 +159,8 @@ async def gdcloneNode(message, link, listen_up):
         else:
             gid = token_hex(4)
             async with download_dict_lock:
-                download_dict[message.id] = GdriveStatus(drive, size, message, gid, 'cl')
+                download_dict[message.id] = GdriveStatus(
+                    drive, size, message, gid, 'cl', listener.upload_details)
             await sendStatusMessage(message)
             link, size, mime_type, files, folders = await sync_to_async(drive.clone, link, listener.drive_id)
         if not link:
@@ -173,22 +175,28 @@ async def gdcloneNode(message, link, listen_up):
 
 @new_task
 async def clone(client, message):
-    await send_react(message)
     input_list = message.text.split(' ')
-    arg_base   = {'link'   : '', 
-                  '-i'     : '0', 
-                  '-up'    : '',
-                  '-rcf'   : '',
-                  '-id'    : '',
-                  '-index' : ''}
-    args       = arg_parser(input_list[1:], arg_base)
-    i          = args['-i']
-    dst_path   = args['-up']
+
+    arg_base = {'link': '', 
+                '-i': 0, 
+                '-up': '', '-upload': '',
+                '-rcf': '',
+                '-id': '',
+                '-index': '',
+    }
+
+    args = arg_parser(input_list[1:], arg_base)
+
+    try:
+        multi = int(args['-i'])
+    except:
+        multi = 0
+
+    dst_path   = args['-up'] or args['-upload']
     rcf        = args['-rcf']
     link       = args['link']
     drive_id   = args['-id']
     index_link = args['-index']
-    multi      = int(i) if i.isdigit() else 0
     
     if username := message.from_user.username:
         tag = f"@{username}"
@@ -224,15 +232,14 @@ async def clone(client, message):
 
     error_msg = []
     error_button = None
-    if await nsfw_precheck(message):
-    	  error_msg.extend(['NSFW detected'])
-    task_utilis_msg, error_button = await task_utils(message)
-    if task_utilis_msg:
-        error_msg.extend(task_utilis_msg)
+    if not await isAdmin(message):
+        task_utilis_msg, error_button = await task_utils(message)
+        if task_utilis_msg:
+            error_msg.extend(task_utilis_msg)
     if error_msg:
         final_msg = f'Hey, <b>{tag}</b>!\n'
         for __i, __msg in enumerate(error_msg, 1):
-            final_msg += f'\n<blockquote><b>{__i}</b>: {__msg}</blockquote>'
+            final_msg += f'\n<b>{__i}</b>: {__msg}\n'
         if error_button is not None:
             error_button = error_button.build_menu(2)
         await delete_links(message)
